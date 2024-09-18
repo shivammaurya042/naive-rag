@@ -20,5 +20,5 @@ const vectoreStore = new SupabaseVectorStore(embeddings, {
     queryName: 'match_documents'
 });
 
-// Vectorstores can be converted to the retriever interface like:
+// Vectorstores can be converted to the retriever interface as:
 export const retriver = vectoreStore.asRetriever();

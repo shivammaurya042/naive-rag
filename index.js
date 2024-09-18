@@ -1,40 +1,45 @@
-/* eslint-disable no-unused-vars */
 import dotenv from 'dotenv';
 dotenv.config();
 
-// import fs from 'fs/promises';
 // import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
+import readline from 'readline';
+import { stdin, stdout } from 'process';
 import { ChatOpenAI } from "@langchain/openai";
 import { PromptTemplate } from "@langchain/core/prompts";
 import { StringOutputParser } from "@langchain/core/output_parsers";
 import { RunnableSequence, RunnablePassthrough } from "@langchain/core/runnables";
 import { retriver } from './utils/retriever.js';
 
+const rl = readline.createInterface({
+    input: stdin,
+    output: stdout
+  });
+
 try {
     const llm = new ChatOpenAI({ modelName: 'gpt-4o-mini' });
 
     // Create a prompt template for standalone question.
-    const stdQTemplate = 'create a standalone question from the following question: {question}';
+    const stdQTemplate = `given some conversation history (if any) and a question, create a standalone question from the following question.
+    conversation history: {conv_history}
+    question: {question}`;
     const stdQPrompt = PromptTemplate.fromTemplate(stdQTemplate);
 
-    // Create a prompt template for the answer.
+    // Create a prompt template for llm answer.
     const llmAnswerTemplate =
-        `You are an helpful bot that is meant to answer user queries.
-        Remember to be friendly. Only answer from the context provided. never makeup answers.
-        apologise if you don't know the answer and advise the user to email to shivammaurya042@gmail.com
-        context: {context}. question: {question}`;
+        `you are an helpful bot that is meant to answer user queries from the given context.
+        remember to be friendly. only answer from the context provided, if not found then use conversation history to get the answer. dont try to make up an answer.
+        dont be lazy to provide complete answer. apologise if you don't know the answer and advise the user to email to shivammaurya042@gmail.com
+        context: {context}
+        conversation history: {conv_history}
+        question: {question}`;
     const llmAnswerPrompt = PromptTemplate.fromTemplate(llmAnswerTemplate);
-
-    // user question.
-    const question = "langhchain is great but I wonder what exactly is a chain here.";
-
-    // Create a chain for the question.
-    // const chain = stdQPrompt.pipe(llm).pipe(new StringOutputParser()).pipe(retriver).pipe(combinePageContent()).pipe(llmAnswerPrompt);
 
     const stdQChain = RunnableSequence.from([stdQPrompt, llm, new StringOutputParser()]);
     const retrieverChain = RunnableSequence.from([prev => prev.std_question, retriver, combinePageContent]);
     const llmAnswerChain = RunnableSequence.from([llmAnswerPrompt, llm, new StringOutputParser()]);
 
+    // Create a chain for the question.
+    // const chain = stdQPrompt.pipe(llm).pipe(new StringOutputParser()).pipe(retriver).pipe(combinePageContent()).pipe(llmAnswerPrompt);
     const chain = RunnableSequence.from([
         {
             std_question: stdQChain,
@@ -42,24 +47,19 @@ try {
         },
         {
             context: retrieverChain,
-            question: ({original_input})=>original_input.question
+            question: ({original_input})=>original_input.question,
+            conv_history: ({original_input})=>original_input.conv_history
         },
         llmAnswerChain]);
 
-    const response = await chain.invoke({ question: question });
-    console.log('response', response);
+    const convHistory = [];
+    while (true) {
+        const question = await userQuestion('User turn: ');
+        const response = await chain.invoke({ question: question, conv_history: formatConvHistory(convHistory) });
 
-
-    // Invoke the chain.
-    // const responseFromVectorStore = await chain.invoke({ context: question });
-
-    // const llmAnswerChain = llmAnswerPrompt.pipe(llm);
-
-    // const responseFromVectorStore1 = await stdQChain.invoke({ context: question });
-
-
-    // const llmResponse = await llmAnswerChain.invoke({ question: question, context: pageContent });
-
+        convHistory.push(question, response);
+        console.log('AI response: ', response);
+    }
 
 } catch (error) {
     console.log(error);
@@ -69,7 +69,18 @@ function combinePageContent(docs) {
     return docs.map(doc => doc.pageContent).join('\n\n');
 }
 
-// // get our docs and convert into embeddings to store in vectore store.
+function userQuestion(quest) {
+    return new Promise(resolve => rl.question(quest, resolve));
+}
+
+function formatConvHistory(conv) {
+    const formattedHistory = conv.map((message, i) => 
+        i % 2 === 0 ? `user: ${message}` : `assistant: ${message}`
+    ).join('\n');
+    return formattedHistory;
+}
+
+// // below code is for embeddings and storing to vectore store.
 
 // try {
 //     const text = await fs.readFile('text.txt', 'utf-8');
